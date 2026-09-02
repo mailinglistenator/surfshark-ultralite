@@ -1,8 +1,9 @@
-# Surfshark Eco-Freezer
+# Surfshark Ultra-Lite
 
-Zero-CPU eco-mode for the official Surfshark Linux app (v3.12, Electron 37) —
-plus a supervision harness that **proves** the VPN tunnel and your local
-AI-agent/IDE sessions stay alive while the UI is frozen.
+Ultra-lite web control panel for the official Surfshark Linux app, plus a
+zero-CPU **eco-mode freezer** — with a supervision harness that **proves**
+the VPN tunnel and your local AI-agent/IDE sessions stay alive while the
+UI is frozen.
 
 ## The problem
 
