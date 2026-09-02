@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SurfShark Eco Control Center (0% CPU)</title>
+<style>
+  :root {
+    --bg: #0b0f19;
+    --card: #151b28;
+    --card-hover: #1c2436;
+    --line: #222d42;
+    --fg: #f0f4fc;
+    --muted: #8b9bb4;
+    --green: #10b981;
+    --green-glow: rgba(16, 185, 129, 0.2);
+    --red: #ef4444;
+    --red-glow: rgba(239, 68, 68, 0.2);
+    --blue: #3b82f6;
+    --accent: #00d2aa;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); min-height: 100vh; padding: 24px; }
+  .container { max-width: 680px; margin: 0 auto; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+  h1 { font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .logo-badge { background: linear-gradient(135deg, #00d2aa, #0088cc); color: #000; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 6px; letter-spacing: 0.5px; }
+  .zero-cpu { color: var(--accent); font-size: 12px; font-weight: 600; border: 1px solid rgba(0,210,170,0.3); padding: 3px 8px; border-radius: 999px; }
+  
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin-bottom: 14px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); }
+  
+  .status-hero { display: flex; align-items: center; justify-content: space-between; padding: 18px; border-radius: 12px; border: 1px solid var(--line); margin-bottom: 16px; transition: all 0.3s ease; }
+  .status-hero.connected { background: linear-gradient(135deg, #0c231e, #132a22); border-color: rgba(16,185,129,0.4); box-shadow: 0 0 25px var(--green-glow); }
+  .status-hero.disconnected { background: linear-gradient(135deg, #241416, #2a181a); border-color: rgba(239,68,68,0.3); box-shadow: 0 0 25px var(--red-glow); }
+  
+  .status-title { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .status-meta { font-size: 13px; color: var(--muted); }
+  
+  .btn-hero { padding: 9px 18px; font-size: 13px; font-weight: 700; border-radius: 8px; border: 0; cursor: pointer; transition: all 0.15s; }
+  .btn-hero.btn-open { background: var(--accent); color: #071318; }
+  .btn-hero:hover { filter: brightness(1.15); transform: translateY(-1px); }
+  
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  .stat-box { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .stat-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-value { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  
+  .section-title { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  
+  .toggle-bar { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; }
+  .switch { position: relative; width: 44px; height: 24px; background: var(--line); border-radius: 999px; cursor: pointer; transition: 0.2s; flex-shrink: 0; }
+  .switch.on { background: var(--green); }
+  .switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: 0.2s; }
+  .switch.on::after { left: 23px; }
+  
+  #log { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: var(--muted); max-height: 100px; overflow-y: auto; }
+  #log div { padding: 2px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Surf<span style="color:var(--accent)">Shark</span> <span class="logo-badge">ECO</span></h1>
+    <span class="zero-cpu">⚡ 0% CPU Optimizer</span>
+  </header>
+
+  <div id="statusHero" class="status-hero disconnected">
+    <div>
+      <div id="statusTitle" class="status-title">○ Disconnected</div>
+      <div id="statusMeta" class="status-meta">Your traffic is unencrypted (exposed)</div>
+    </div>
+    <button id="btnOpenApp" class="btn-hero btn-open">Open App Window</button>
+  </div>
+
+  <div class="grid-2">
+    <div class="stat-box">
+      <div class="stat-label">Public Exit IP</div>
+      <div id="ipVal" class="stat-value">—</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-label">Location / Org</div>
+      <div id="geoVal" class="stat-value">—</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="toggle-bar">
+      <div>
+        <div style="font-weight:700;font-size:15px;color:var(--accent);">❄️ Eco-Mode Freezer (0.0% CPU)</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px;">
+          Suspends the Electron UI animation loop. <b>Tunnel remains 100% active</b> while CPU usage drops to 0%.
+        </div>
+      </div>
+      <div id="ecoToggle" class="switch"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Activity Log</div>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+const E = id => document.getElementById(id);
+let currentState = {};
+
+function log(msg, isErr) {
+  const l = E('log');
+  const d = document.createElement('div');
+  d.textContent = new Date().toLocaleTimeString() + '  ' + msg;
+  if (isErr) d.style.color = 'var(--red)';
+  l.insertBefore(d, l.firstChild);
+  while (l.children.length > 50) l.removeChild(l.lastChild);
+}
+
+async function fetchState() {
+  try {
+    const res = await fetch('/api/state');
+    const st = await res.json();
+    currentState = st;
+    
+    const hero = E('statusHero');
+    const title = E('statusTitle');
+    const meta = E('statusMeta');
+    
+    if (st.connected_real) {
+      hero.className = 'status-hero connected';
+      title.innerHTML = '● Protected & Connected';
+      meta.textContent = `${st.exit_geo || 'United States'} · ${st.exit_org || 'Cyberzone S.A.'}`;
+    } else {
+      hero.className = 'status-hero disconnected';
+      title.innerHTML = '○ Disconnected';
+      meta.textContent = 'Direct Wi-Fi Connection (Unencrypted)';
+    }
+    
+    E('ipVal').textContent = st.public_ip || '—';
+    E('geoVal').textContent = st.exit_geo ? `${st.exit_geo} (${st.exit_org})` : '—';
+    E('ecoToggle').classList.toggle('on', !!st.gui_frozen);
+  } catch (e) {
+    log('State update failed: ' + e, true);
+  }
+}
+
+E('btnOpenApp').onclick = async () => {
+  log('Opening Surfshark official app window…');
+  try {
+    await fetch('/api/open-gui', { method: 'POST' });
+    fetchState();
+  } catch (e) {
+    log('Failed opening app: ' + e, true);
+  }
+};
+
+E('ecoToggle').onclick = async () => {
+  const target = !E('ecoToggle').classList.contains('on');
+  log(target ? 'Freezing UI renderer (dropping CPU to 0.0%)…' : 'Resuming UI renderer…');
+  try {
+    const path = target ? '/api/freeze' : '/api/unfreeze';
+    const r = await fetch(path, { method: 'POST' });
+    const d = await r.json();
+    log(d.message);
+    fetchState();
+  } catch (e) {
+    log('Eco-Mode toggle failed: ' + e, true);
+  }
+};
+
+fetchState();
+setInterval(fetchState, 3000);
+</script>
+</body>
+</html>

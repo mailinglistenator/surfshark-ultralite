@@ -1,0 +1,8 @@
+# SECRETS — never commit these
+config.json
+HANDOFF.md
+
+# runtime artifacts
+*.log
+__pycache__/
+*.pyc
