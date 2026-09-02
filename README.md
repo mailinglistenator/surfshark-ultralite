@@ -23,8 +23,9 @@ while the tunnel, NetworkManager profile, and local IPC stay alive.
 ## What's here
 
 - `app.py` + `index.html` — ultra-lite web panel on `127.0.0.1:8777`:
-  real-probe status (ipify/ipinfo), freeze/unfreeze endpoints, CleanWeb
-  toggle, open-GUI action
+  kernel routing ground truth (`dev surfshark_wg`) + resilient multi-endpoint probe
+  fallback (`ipinfo.io` / `ipify` / `ip.sb` / `icanhazip`), freeze/unfreeze endpoints,
+  CleanWeb toggle, open-GUI action
 - `launch.sh` — starts the panel (if not running) and opens it
 - `freeze_audit.py` — supervised freeze test: probes every 10s (exit IP,
   tunnel-routed agent sockets, send-queue stall heuristics, NetworkManager
@@ -38,7 +39,7 @@ while the tunnel, NetworkManager profile, and local IPC stay alive.
   process — the main holds the NM connection and the preshared-key
   keepalive. Freezing or killing it tears the tunnel down.
 - Only freeze **after** a real traffic probe confirms a good exit
-  (`api.ipify.org` / `ipinfo.io` org check), never mid-connect or
+  (kernel route + external egress probe), never mid-connect or
   mid-switch.
 - Unfreeze before clicking anything in the GUI — a stopped renderer can't
   process input. Renderers that respawn later start unfrozen; re-freeze.

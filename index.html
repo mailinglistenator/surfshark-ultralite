@@ -14,6 +14,8 @@
     --muted: #8b9bb4;
     --green: #10b981;
     --green-glow: rgba(16, 185, 129, 0.2);
+    --amber: #f59e0b;
+    --amber-glow: rgba(245, 158, 11, 0.2);
     --red: #ef4444;
     --red-glow: rgba(239, 68, 68, 0.2);
     --blue: #3b82f6;
@@ -32,6 +34,7 @@
   
   .status-hero { display: flex; align-items: center; justify-content: space-between; padding: 18px; border-radius: 12px; border: 1px solid var(--line); margin-bottom: 16px; transition: all 0.3s ease; }
   .status-hero.connected { background: linear-gradient(135deg, #0c231e, #132a22); border-color: rgba(16,185,129,0.4); box-shadow: 0 0 25px var(--green-glow); }
+  .status-hero.stalled { background: linear-gradient(135deg, #261e12, #2f2516); border-color: rgba(245,158,11,0.4); box-shadow: 0 0 25px var(--amber-glow); }
   .status-hero.disconnected { background: linear-gradient(135deg, #241416, #2a181a); border-color: rgba(239,68,68,0.3); box-shadow: 0 0 25px var(--red-glow); }
   
   .status-title { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
@@ -128,15 +131,21 @@ async function fetchState() {
     if (st.connected_real) {
       hero.className = 'status-hero connected';
       title.innerHTML = '● Protected & Connected';
-      meta.textContent = `${st.exit_geo || 'United States'} · ${st.exit_org || 'Cyberzone S.A.'}`;
+      const locText = st.exit_geo ? `${st.exit_geo}` : 'Encrypted Tunnel';
+      const orgText = st.exit_org ? ` · ${st.exit_org}` : '';
+      meta.textContent = `${locText}${orgText}`;
+    } else if (st.tunnel_stalled) {
+      hero.className = 'status-hero stalled';
+      title.innerHTML = '⚠ Tunnel Stalled';
+      meta.textContent = 'WireGuard route active (surfshark_wg) but external probe timed out';
     } else {
       hero.className = 'status-hero disconnected';
       title.innerHTML = '○ Disconnected';
-      meta.textContent = 'Direct Wi-Fi Connection (Unencrypted)';
+      meta.textContent = 'Direct Wi-Fi / Ethernet Connection (Unencrypted)';
     }
     
     E('ipVal').textContent = st.public_ip || '—';
-    E('geoVal').textContent = st.exit_geo ? `${st.exit_geo} (${st.exit_org})` : '—';
+    E('geoVal').textContent = st.exit_geo ? `${st.exit_geo} (${st.exit_org || 'Direct'})` : (st.exit_org || '—');
     E('ecoToggle').classList.toggle('on', !!st.gui_frozen);
   } catch (e) {
     log('State update failed: ' + e, true);

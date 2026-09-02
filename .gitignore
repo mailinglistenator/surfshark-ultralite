@@ -1,6 +1,7 @@
 # SECRETS — never commit these
 config.json
 HANDOFF.md
+surfshark-handoff.md
 
 # runtime artifacts
 *.log
