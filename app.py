@@ -30,11 +30,14 @@ _cached_state = {
     "public_ip": None,
     "exit_org": "",
     "exit_geo": "",
+    "probe_source": "",
+    "fallback_active": False,
+    "probe_warnings": [],
     "gui_running": False,
     "gui_frozen": False,
     "locations_count": 0,
     "last_check": 0,
-    "version": "1.1.1"
+    "version": "1.2.0"
 }
 _state_lock = threading.Lock()
 _last_full_probe = 0
@@ -82,7 +85,10 @@ def probe_egress():
     Probe public IP and geo/org metadata.
     Tries ip-api.com first (better datacenter/VPN mapping), then ipinfo.io,
     falling back to resilient IP probe endpoints.
+    Explicitly records all provider errors so fallbacks are NEVER silent.
     """
+    warnings = []
+
     # 1. Primary probe: ip-api.com (accurate VPN datacenter city/country mapping)
     try:
         req = urllib.request.Request("http://ip-api.com/json", headers={"User-Agent": "curl/8"})
@@ -95,11 +101,13 @@ def probe_egress():
                 geo = f"{city}, {country}".strip(", ")
                 org = data.get("org") or data.get("isp") or data.get("as", "")
                 if ip:
-                    return ip, geo, org
-    except Exception:
-        pass
+                    return ip, geo, org, "ip-api.com", False, warnings
+            else:
+                warnings.append(f"Primary probe (ip-api.com) returned status error: {data.get('message', 'unknown')}")
+    except Exception as e:
+        warnings.append(f"Primary probe (ip-api.com) failed: {e}")
 
-    # 2. Secondary probe: ipinfo.io
+    # 2. Secondary probe: ipinfo.io (fallback)
     try:
         req = urllib.request.Request("https://ipinfo.io/json", headers={"User-Agent": "curl/8"})
         with urllib.request.urlopen(req, timeout=4) as r:
@@ -110,27 +118,30 @@ def probe_egress():
             country = data.get("country", "")
             geo = f"{city}, {country}".strip(", ")
             if ip:
-                return ip, geo, org
-    except Exception:
-        pass
+                warnings.append("Using fallback GeoIP provider: ipinfo.io")
+                return ip, geo, org, "ipinfo.io (fallback)", True, warnings
+    except Exception as e:
+        warnings.append(f"Secondary probe (ipinfo.io) failed: {e}")
 
     # 3. Resilient IP fallback endpoints if GeoIP APIs time out or rate-limit
     fallbacks = [
-        "https://api.ipify.org",
-        "https://api.ip.sb/ip",
-        "https://icanhazip.com"
+        ("api.ipify.org", "https://api.ipify.org"),
+        ("api.ip.sb", "https://api.ip.sb/ip"),
+        ("icanhazip.com", "https://icanhazip.com")
     ]
-    for url in fallbacks:
+    for name, url in fallbacks:
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "curl/8"})
             with urllib.request.urlopen(req, timeout=4) as r:
                 ip = r.read().decode().strip()[:64]
                 if ip and re.match(r"^\d{1,3}(\.\d{1,3}){3}$", ip):
-                    return ip, "", ""
-        except Exception:
-            continue
+                    warnings.append(f"All GeoIP APIs failed; IP resolved via emergency fallback {name}")
+                    return ip, "", "", f"{name} (fallback IP only)", True, warnings
+        except Exception as e:
+            warnings.append(f"Fallback {name} failed: {e}")
 
-    return None, "", ""
+    warnings.append("All egress probes failed (tunnel blackholed or connection offline)")
+    return None, "", "", "None (all probes failed)", True, warnings
 
 def get_electron_processes():
     """Finds Surfshark Electron processes; distinguishes zygote renderers from the main process."""
@@ -175,18 +186,32 @@ def probe_network(force_egress=False):
     ip = _cached_state["public_ip"]
     geo = _cached_state["exit_geo"]
     org = _cached_state["exit_org"]
+    probe_source = _cached_state["probe_source"]
+    fallback_active = _cached_state["fallback_active"]
+    warnings = list(_cached_state["probe_warnings"])
     
     if needs_egress:
-        probed_ip, probed_geo, probed_org = probe_egress()
+        probed_ip, probed_geo, probed_org, probe_src, fb_active, probe_warns = probe_egress()
         _last_full_probe = now
+        warnings = probe_warns
+        fallback_active = fb_active
+        probe_source = probe_src or ""
+        
         if probed_ip:
             ip = probed_ip
             ss_loc = get_surfshark_session_location() if wg_routed else None
+            
             if probed_geo:
                 geo = probed_geo
-                # If WireGuard session points to a specific location (e.g. Thailand) but GeoIP returned a different country (e.g. Singapore WHOIS), trust the session
-                if ss_loc and ss_loc.split(",")[-1].strip().lower() not in probed_geo.lower():
-                    geo = f"{probed_geo} [{ss_loc}]" if not ("Singapore" in probed_geo and "TH" in ss_loc) else "Bangkok, Thailand"
+                # Detect and warn if GeoIP returned a conflicting country against session
+                if ss_loc:
+                    session_cc = ss_loc.split(",")[-1].strip().lower()
+                    if session_cc not in probed_geo.lower():
+                        fallback_active = True
+                        mismatch_warn = f"Location discrepancy: probe returned '{probed_geo}' ({probe_src}) but Surfshark session is '{ss_loc}'"
+                        if mismatch_warn not in warnings:
+                            warnings.append(mismatch_warn)
+                        geo = f"{probed_geo} [Session: {ss_loc}]"
             elif ss_loc:
                 geo = ss_loc
             elif ip != _cached_state.get("public_ip"):
@@ -197,8 +222,9 @@ def probe_network(force_egress=False):
             elif ip != _cached_state.get("public_ip"):
                 org = ""
         else:
-            # If probe completely failed
             ip = None
+            probe_source = "None (probes failed)"
+            fallback_active = True
 
     # Ground truth connection logic:
     # If routed via WireGuard AND external egress succeeded -> 100% Protected
@@ -217,6 +243,9 @@ def probe_network(force_egress=False):
         _cached_state["public_ip"] = ip
         _cached_state["exit_org"] = org
         _cached_state["exit_geo"] = geo
+        _cached_state["probe_source"] = probe_source
+        _cached_state["fallback_active"] = fallback_active
+        _cached_state["probe_warnings"] = warnings
         _cached_state["gui_running"] = gui_running
         _cached_state["gui_frozen"] = gui_frozen
         _cached_state["locations_count"] = len(locs)

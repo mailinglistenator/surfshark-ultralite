@@ -37,6 +37,12 @@
   .status-hero.stalled { background: linear-gradient(135deg, #261e12, #2f2516); border-color: rgba(245,158,11,0.4); box-shadow: 0 0 25px var(--amber-glow); }
   .status-hero.disconnected { background: linear-gradient(135deg, #241416, #2a181a); border-color: rgba(239,68,68,0.3); box-shadow: 0 0 25px var(--red-glow); }
   
+  .warning-card { background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.45); border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; font-size: 13px; color: #fcd34d; }
+  .warning-title { font-weight: 700; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+  .warning-list { color: var(--fg); font-size: 12px; line-height: 1.5; padding-left: 18px; margin: 0; }
+  .badge-fallback { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-left: 6px; text-transform: uppercase; }
+  .badge-ok { background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-left: 6px; text-transform: uppercase; }
+
   .status-title { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
   .status-meta { font-size: 13px; color: var(--muted); }
   
@@ -47,7 +53,7 @@
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
   .stat-box { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
   .stat-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .stat-value { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stat-value { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; }
   
   .section-title { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
   
@@ -57,7 +63,7 @@
   .switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: 0.2s; }
   .switch.on::after { left: 23px; }
   
-  #log { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: var(--muted); max-height: 100px; overflow-y: auto; }
+  #log { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: var(--muted); max-height: 120px; overflow-y: auto; }
   #log div { padding: 2px 0; }
 </style>
 </head>
@@ -76,6 +82,11 @@
     <button id="btnOpenApp" class="btn-hero btn-open">Open App Window</button>
   </div>
 
+  <div id="warningCard" class="warning-card" style="display:none;">
+    <div class="warning-title">⚠️ Egress Probe Diagnostics (Fallback / Mismatch Active)</div>
+    <ul id="warningList" class="warning-list"></ul>
+  </div>
+
   <div class="grid-2">
     <div class="stat-box">
       <div class="stat-label">Public Exit IP</div>
@@ -84,6 +95,14 @@
     <div class="stat-box">
       <div class="stat-label">Location / Org</div>
       <div id="geoVal" class="stat-value">—</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-label">Probe Source</div>
+      <div id="probeVal" class="stat-value">—</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-label">Kernel Route</div>
+      <div id="routeVal" class="stat-value">—</div>
     </div>
   </div>
 
@@ -108,12 +127,13 @@
 <script>
 const E = id => document.getElementById(id);
 let currentState = {};
+const seenWarnings = new Set();
 
 function log(msg, isErr) {
   const l = E('log');
   const d = document.createElement('div');
   d.textContent = new Date().toLocaleTimeString() + '  ' + msg;
-  if (isErr) d.style.color = 'var(--red)';
+  if (isErr) d.style.color = 'var(--amber)';
   l.insertBefore(d, l.firstChild);
   while (l.children.length > 50) l.removeChild(l.lastChild);
 }
@@ -144,8 +164,36 @@ async function fetchState() {
       meta.textContent = 'Direct Wi-Fi / Ethernet Connection (Unencrypted)';
     }
     
+    // Warning banner & diagnostic logging
+    const warnCard = E('warningCard');
+    const warnList = E('warningList');
+    if (st.probe_warnings && st.probe_warnings.length > 0) {
+      warnCard.style.display = 'block';
+      warnList.innerHTML = st.probe_warnings.map(w => `<li>${w}</li>`).join('');
+      st.probe_warnings.forEach(w => {
+        if (!seenWarnings.has(w)) {
+          seenWarnings.add(w);
+          log('⚠️ ' + w, true);
+        }
+      });
+    } else {
+      warnCard.style.display = 'none';
+      warnList.innerHTML = '';
+    }
+
     E('ipVal').textContent = st.public_ip || '—';
     E('geoVal').textContent = st.exit_geo ? `${st.exit_geo} (${st.exit_org || 'Direct'})` : (st.exit_org || '—');
+    
+    const probeBox = E('probeVal');
+    if (st.fallback_active) {
+      probeBox.innerHTML = `<span>${st.probe_source || 'Fallback'}</span><span class="badge-fallback">FALLBACK</span>`;
+    } else if (st.probe_source) {
+      probeBox.innerHTML = `<span>${st.probe_source}</span><span class="badge-ok">PRIMARY</span>`;
+    } else {
+      probeBox.textContent = '—';
+    }
+
+    E('routeVal').textContent = st.tunnel_routed ? 'surfshark_wg (table 300000)' : 'Direct Wi-Fi / Local';
     E('ecoToggle').classList.toggle('on', !!st.gui_frozen);
   } catch (e) {
     log('State update failed: ' + e, true);
