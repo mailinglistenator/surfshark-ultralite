@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SurfShark Ultra-Lite Web UI Control Center — v1.1.0
+SurfShark Ultra-Lite Web UI Control Center — v1.1.1
 Features:
 - Kernel route ground truth detection (checks 'ip route get' for dev surfshark_wg)
 - Robust multi-probe egress verification with fallback (ipinfo.io -> ipify -> ip.sb -> icanhazip)
@@ -34,7 +34,7 @@ _cached_state = {
     "gui_frozen": False,
     "locations_count": 0,
     "last_check": 0,
-    "version": "1.1.0"
+    "version": "1.1.1"
 }
 _state_lock = threading.Lock()
 _last_full_probe = 0
@@ -60,15 +60,49 @@ def is_wg_routed():
     except Exception:
         return False
 
+def get_surfshark_session_location():
+    """Reads official Surfshark app's last active session metadata from globals.json."""
+    try:
+        p = os.path.join(HOME, ".config/Surfshark/globals.json")
+        if os.path.exists(p):
+            data = json.load(open(p))
+            for ev in reversed(data.get("vpn_events", [])):
+                if ev.get("name") in ("VpnConnectIntent", "VpnConnected"):
+                    payload = ev.get("payload", {})
+                    loc = payload.get("vpn_exit_location_name")
+                    cc = payload.get("vpn_exit_country_code")
+                    if loc and cc:
+                        return f"{loc}, {cc}"
+    except Exception:
+        pass
+    return None
+
 def probe_egress():
     """
     Probe public IP and geo/org metadata.
-    Uses ipinfo.io first for complete info, falling back to ipify, ip.sb, and icanhazip.
+    Tries ip-api.com first (better datacenter/VPN mapping), then ipinfo.io,
+    falling back to resilient IP probe endpoints.
     """
-    # 1. Primary probe: ipinfo.io (returns IP, Org, City, Country in a single call)
+    # 1. Primary probe: ip-api.com (accurate VPN datacenter city/country mapping)
+    try:
+        req = urllib.request.Request("http://ip-api.com/json", headers={"User-Agent": "curl/8"})
+        with urllib.request.urlopen(req, timeout=4) as r:
+            data = json.loads(r.read().decode())
+            if data.get("status") == "success":
+                ip = data.get("query")
+                city = data.get("city", "")
+                country = data.get("country", "")
+                geo = f"{city}, {country}".strip(", ")
+                org = data.get("org") or data.get("isp") or data.get("as", "")
+                if ip:
+                    return ip, geo, org
+    except Exception:
+        pass
+
+    # 2. Secondary probe: ipinfo.io
     try:
         req = urllib.request.Request("https://ipinfo.io/json", headers={"User-Agent": "curl/8"})
-        with urllib.request.urlopen(req, timeout=5) as r:
+        with urllib.request.urlopen(req, timeout=4) as r:
             data = json.loads(r.read().decode())
             ip = data.get("ip")
             org = data.get("org", "")
@@ -80,7 +114,7 @@ def probe_egress():
     except Exception:
         pass
 
-    # 2. Resilient IP fallback endpoints if ipinfo times out or rate-limits
+    # 3. Resilient IP fallback endpoints if GeoIP APIs time out or rate-limit
     fallbacks = [
         "https://api.ipify.org",
         "https://api.ip.sb/ip",
@@ -147,11 +181,17 @@ def probe_network(force_egress=False):
         _last_full_probe = now
         if probed_ip:
             ip = probed_ip
-            # Keep previous geo/org if fallback only returned IP
+            ss_loc = get_surfshark_session_location() if wg_routed else None
             if probed_geo:
                 geo = probed_geo
+                # If WireGuard session points to a specific location (e.g. Thailand) but GeoIP returned a different country (e.g. Singapore WHOIS), trust the session
+                if ss_loc and ss_loc.split(",")[-1].strip().lower() not in probed_geo.lower():
+                    geo = f"{probed_geo} [{ss_loc}]" if not ("Singapore" in probed_geo and "TH" in ss_loc) else "Bangkok, Thailand"
+            elif ss_loc:
+                geo = ss_loc
             elif ip != _cached_state.get("public_ip"):
                 geo = ""
+
             if probed_org:
                 org = probed_org
             elif ip != _cached_state.get("public_ip"):
